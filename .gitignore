@@ -3,3 +3,4 @@ venv
 gpt2/
 __pycache__
 data/documents/*
+models/
