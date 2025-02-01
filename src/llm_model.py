@@ -9,9 +9,9 @@ class LLMModel:
         self.model_name = model_name
         self.api_url = f"https://api-inference.huggingface.co/models/{model_name}"
         
-        # APIトークンを取得（必要な場合）
+        # APIトークンを取得（環境変数または直接指定）
         if api_token is None:
-            api_token = os.environ.get("HF_API_TOKEN")
+            api_token = os.environ.get("HF_API_TOKEN", "YOUR_HF_API_TOKEN_HERE")
         self.headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
     
     def generate_answer(self, query, context, max_new_tokens=150):
