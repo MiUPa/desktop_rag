@@ -1,4 +1,5 @@
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
 
 class LLMModel:
     def __init__(self, model_name="gpt2"):
@@ -14,8 +15,12 @@ class LLMModel:
         if input_ids.size(1) > max_length:
             input_ids = input_ids[:, -max_length:]  # 最後の1024トークンを使用
 
+        # pad_token_idが設定されていない場合の対処
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
         # attention_maskを設定
-        attention_mask = (input_ids != self.tokenizer.pad_token_id).type(input_ids.dtype)
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).to(dtype=torch.long)
 
         # max_new_tokensを使用して新しいトークンの最大数を指定
         output = self.model.generate(input_ids, attention_mask=attention_mask, max_new_tokens=150)

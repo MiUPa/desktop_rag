@@ -24,6 +24,9 @@ class RAGApp:
         self.result_text = tk.Text(root)
         self.result_text.pack()
 
+        # エンターキーを押したときに検索を実行
+        self.query_entry.bind("<Return>", lambda event: self.search())
+
         # アプリ起動時にPDFを読み込む
         self.load_pdfs()
 
