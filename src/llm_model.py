@@ -1,34 +1,52 @@
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import os
+os.environ["TRANSFORMERS_NO_SAFE_TENSORS"] = "1"
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 class LLMModel:
-    def __init__(self, model_name="gpt2"):
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPT2LMHeadModel.from_pretrained(model_name)
-        self.model.to('cpu')  # モデルをCPUに移動
-        self.model.eval()  # モデルを評価モードに設定
-
+    def __init__(self, model_name=None):
+        if model_name is None:
+            # 現在のスクリプトの絶対パスから、正しい絶対パスに変換する
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            model_name = os.path.abspath(os.path.join(base_dir, "..", "models", "japanese-gpt2-medium"))
+        
+        # READMEの指示通りにAutoTokenizerを使用
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            use_fast=False,  # READMEの指示通り
+            use_local_files_only=True
+        )
+        # do_lower_caseの設定は不要です。すでにトークナイザー内で正しく設定されています。
+        
+        # モデルの読み込み
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            local_files_only=True
+        )
+        self.model.to('cpu')
+        self.model.eval()
+        
     def generate_answer(self, query, context, max_new_tokens=150):
-        # プロンプトに日本語での回答指示を追加
-        prompt_prefix = "以下の内容に基づき、すべて日本語で回答してください。\n\n"
+        prompt_prefix = "以下のPDF内容を参考にして、質問に対して必要な情報だけを元に、自然な日本語で回答してください。\n\n"
         input_text = prompt_prefix + f"Context: {context}\nQuestion: {query}\nAnswer:"
-        # トークン化時に自動でトランケーションを適用
+        
         encoding = self.tokenizer(
             input_text,
             truncation=True,
-            max_length=self.model.config.n_positions,  # 最大シーケンス長（通常は1024）
-            return_tensors="pt"
+            max_length=self.model.config.n_positions,
+            return_tensors="pt",
+            padding=True
         )
+        
         input_ids = encoding["input_ids"].to('cpu')
         attention_mask = encoding["attention_mask"].to('cpu')
         
-        # 生成前に、入力トークン数と生成可能なトークン数の関係をチェック
         available_new_tokens = self.model.config.n_positions - input_ids.size(1)
         if available_new_tokens < max_new_tokens:
-            # 生成可能なトークン数が不足している場合は、利用可能な分だけ使用
-            max_new_tokens = max(1, available_new_tokens)  # 少なくとも1トークンは生成
-
-        with torch.no_grad():  # 推論時は勾配計算を無効にする
+            max_new_tokens = max(1, available_new_tokens)
+        
+        with torch.no_grad():
             output_ids = self.model.generate(
                 input_ids,
                 attention_mask=attention_mask,
@@ -36,27 +54,13 @@ class LLMModel:
                 pad_token_id=self.tokenizer.eos_token_id,
                 no_repeat_ngram_size=2,
                 do_sample=True,
-                top_p=0.95,
-                top_k=50
+                top_p=0.9,
+                top_k=40,
+                temperature=0.7
             )
+            
         answer = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        
         if "Answer:" in answer:
             answer = answer.split("Answer:")[-1].strip()
         return answer
-
-# モデル名を指定
-model_name = "gpt2"  # または "gpt2-medium", "gpt2-large", "gpt2-xl"
-
-# トークナイザーとモデルをダウンロード
-tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-model = GPT2LMHeadModel.from_pretrained(model_name)
-
-# モデルをローカルに保存
-tokenizer.save_pretrained("./gpt2")
-model.save_pretrained("./gpt2")
-
-input_text = "あなたの質問をここに入力"
-input_ids = tokenizer.encode(input_text, return_tensors="pt")
-
-output = model.generate(input_ids, max_length=100)
-print(tokenizer.decode(output[0], skip_special_tokens=True))

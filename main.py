@@ -1,4 +1,8 @@
 import os
+os.environ["TRANSFORMERS_NO_SAFE_TENSORS"] = "1"
+
+# その後で他のモジュールをインポートする
+from src.app import RAGApp
 import sys
 import time
 import signal
@@ -16,14 +20,15 @@ class ChangeHandler(FileSystemEventHandler):
             if self.process:
                 print("既存のアプリを終了します...")
                 self.process.terminate()  # 既存のプロセスを終了
-                self.process.wait()  # プロセスが終了するのを待つ
+                self.process.wait()       # プロセスが終了するのを待つ
             print("新しいアプリを起動します...")
             os.execv(sys.executable, ['python'] + sys.argv)
 
 if __name__ == "__main__":
     path = '.'  # 現在のディレクトリを監視
-    process = subprocess.Popen(['python', 'src/app.py'])  # アプリを起動
+    process = subprocess.Popen(['python', 'src/app.py'])  # アプリケーションの起動
     event_handler = ChangeHandler(process)
+    
     observer = Observer()
     observer.schedule(event_handler, path, recursive=True)
     observer.start()

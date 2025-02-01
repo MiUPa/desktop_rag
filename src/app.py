@@ -1,9 +1,9 @@
 import os
 import tkinter as tk
 from tkinter import filedialog
-from pdf_parser import extract_text_from_pdf
-from ranking_model import rank_results
-from llm_model import LLMModel
+from src.pdf_parser import extract_text_from_pdf
+from src.ranking_model import rank_results
+from src.llm_model import LLMModel
 
 class RAGApp:
     def __init__(self, root):
