@@ -58,12 +58,18 @@ class RAGApp:
         self.result_text.insert(tk.END, f"AIの回答: {results}\n")
 
     def perform_search(self, query):
-        all_texts = [extract_text_from_pdf(pdf) for pdf in self.pdf_files]
-        ranked_results = rank_results(query, all_texts)
+        all_texts = []
+        for pdf in self.pdf_files:
+            full_text = extract_text_from_pdf(pdf)
+            # PDFのテキストを段落に分割（改行毎などで簡易分割）
+            paragraphs = full_text.split("\n")
+            all_texts.extend(paragraphs)
 
-        if ranked_results:
-            best_document = ranked_results[0]
-            answer = self.llm_model.generate_answer(query, best_document)
+        # ランキングアルゴリズムで関連度の高い部分を抽出
+        ranked_context = rank_results(query, all_texts)
+
+        if ranked_context.strip():
+            answer = self.llm_model.generate_answer(query, ranked_context)
             return answer
         else:
             return "関連する文書が見つかりませんでした。"

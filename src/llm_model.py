@@ -9,7 +9,9 @@ class LLMModel:
         self.model.eval()  # モデルを評価モードに設定
 
     def generate_answer(self, query, context, max_new_tokens=150):
-        input_text = f"Context: {context}\nQuestion: {query}\nAnswer:"
+        # プロンプトに日本語での回答指示を追加
+        prompt_prefix = "以下の内容に基づき、すべて日本語で回答してください。\n\n"
+        input_text = prompt_prefix + f"Context: {context}\nQuestion: {query}\nAnswer:"
         # トークン化時に自動でトランケーションを適用
         encoding = self.tokenizer(
             input_text,
