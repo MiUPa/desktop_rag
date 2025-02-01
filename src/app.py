@@ -37,7 +37,8 @@ class RAGApp:
 
         for filename in os.listdir(documents_dir):
             if filename.endswith('.pdf'):
-                self.pdf_files.append(os.path.join(documents_dir, filename))
+                file_path = os.path.join(documents_dir, filename)
+                self.pdf_files.append(file_path)
                 self.result_text.insert(tk.END, f"読み込まれたPDF: {filename}\n")
 
     def add_pdf(self):
@@ -66,9 +67,6 @@ class RAGApp:
             return answer
         else:
             return "関連する文書が見つかりませんでした。"
-
-    def generate_answer(self, query, document):
-        return f"クエリ: {query}\n関連文書に基づく回答: {document[:200]}..."
 
 if __name__ == "__main__":
     root = tk.Tk()
