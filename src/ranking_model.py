@@ -23,3 +23,6 @@ def rank_results(query, texts, top_k=3):
     # 上位の段落を結合して返す
     ranked_text = " ".join([texts[idx] for idx in top_indices])
     return ranked_text
+
+# このファイルはDeepSeekの情報検索機能を使用する場合は不要です。
+# ただし、他のランキングアルゴリズムを使用する場合はそのまま使用できます。
