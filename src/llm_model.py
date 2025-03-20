@@ -2,11 +2,15 @@ import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer, util
+import time
 
 # モックアップとして簡易的に実装
 class LLMModel:
     def __init__(self, retrieval_model_path=None, generation_model_path=None):
         print("LLMModel初期化中...")
+        
+        # ストリーミング制御用フラグ
+        self.streaming_active = True
         
         # モデルパスが指定されていない場合はデフォルトを使用
         if retrieval_model_path is None:
@@ -94,8 +98,155 @@ class LLMModel:
             text = self.tokenizer.decode(tokens)
         return text
 
+    def generate_answer_streaming(self, query, context, callback=None):
+        """ストリーミングモードで回答を生成する"""
+        print(f"ストリーミングクエリ: {query}")
+        try:
+            relevant_context = self.retrieve_relevant_context(query, context)
+            print(f"抽出されたコンテキスト: {relevant_context[:100]}...")
+            
+            if self.use_mock or self.generation_model is None or self.tokenizer is None:
+                # モックアップモードでの回答生成
+                mock_answer = f"あなたの質問「{query}」に対する回答です。これはモックアップモードで、実際のAI生成はされていません。"
+                
+                # モックアップでもストリーミング風の表示を実現
+                if callback:
+                    for char in mock_answer:
+                        callback(char)
+                        time.sleep(0.03)  # モックアップの場合は文字ごとに遅延
+                
+                return mock_answer
+            
+            # 改良されたプロンプト形式
+            prompt = f"""コンテキスト:
+{relevant_context}
+
+質問:
+{query}
+
+指示: 上記のコンテキストに基づいて、質問に対する回答を日本語で生成してください。できるだけ具体的に答えてください。
+
+回答:
+"""
+            
+            # 入力が長すぎる場合は切り詰める
+            prompt = self.truncate_input_to_model_limit(prompt)
+            
+            # 入力トークンの準備
+            encoded_input = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=self.max_model_length // 2)
+            input_ids = encoded_input["input_ids"]
+            
+            # アテンションマスクを明示的に設定
+            attention_mask = encoded_input.get("attention_mask", torch.ones_like(input_ids))
+            
+            try:
+                # 改良されたストリーミング生成方法
+                # 全体を一度に生成してから少しずつ表示する方法に変更
+                with torch.no_grad():
+                    # 完全な回答を一度に生成
+                    output = self.generation_model.generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_length=min(self.max_model_length, input_ids.shape[1] + 150),
+                        num_return_sequences=1,
+                        temperature=0.5,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        top_p=0.92,
+                        top_k=50,
+                        repetition_penalty=1.2,
+                        length_penalty=1.0
+                    )
+                    
+                    # 生成されたテキストをデコード
+                    generated_text = self.tokenizer.decode(output[0], skip_special_tokens=True)
+                    
+                    # "回答:"以降の部分を抽出
+                    if "回答:" in generated_text:
+                        answer = generated_text.split("回答:")[-1].strip()
+                    elif "回答：" in generated_text:  # 全角コロンのケース
+                        answer = generated_text.split("回答：")[-1].strip()
+                    else:
+                        # プロンプトからの続きとして回答を抽出
+                        answer = generated_text[len(prompt):].strip()
+                    
+                    # 空の回答の場合は代替テキストを使用
+                    if not answer:
+                        answer = "統計検定1級では、確率論、統計的推測、多変量解析、時系列解析などの高度な統計学の問題が出題されます。詳細な情報が得られませんでした。"
+                    
+                    # 文字ごとにストリーミング風に表示
+                    if callback:
+                        for char in answer:
+                            if not self.streaming_active:
+                                break
+                            callback(char)
+                            # 人間が読みやすいスピードで表示するための遅延
+                            time.sleep(0.01)
+                    
+                    return answer
+                
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e):
+                    print("CUDAメモリ不足エラー：より短いコンテキストで再試行します")
+                    # コンテキストを短くして再試行
+                    shorter_context = relevant_context[:len(relevant_context)//2]
+                    prompt = f"""コンテキスト:
+{shorter_context}
+
+質問:
+{query}
+
+指示: 上記のコンテキストに基づいて、質問に対する回答を日本語で生成してください。
+
+回答:
+"""
+                    prompt = self.truncate_input_to_model_limit(prompt)
+                    
+                    # エラーが発生した場合は非ストリーミングモードで生成
+                    encoded_input = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=self.max_model_length // 2)
+                    input_ids = encoded_input["input_ids"]
+                    attention_mask = encoded_input.get("attention_mask", torch.ones_like(input_ids))
+                    
+                    with torch.no_grad():
+                        output = self.generation_model.generate(
+                            input_ids,
+                            attention_mask=attention_mask,
+                            max_length=min(self.max_model_length, input_ids.shape[1] + 100),
+                            num_return_sequences=1,
+                            temperature=0.5,
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            top_k=50,
+                            repetition_penalty=1.2
+                        )
+                    
+                    generated_text = self.tokenizer.decode(output[0], skip_special_tokens=True)
+                    answer = generated_text[len(prompt):].strip()
+                    
+                    # 非ストリーミングの結果もコールバックで文字ごとに送信
+                    if callback and answer:
+                        for char in answer:
+                            callback(char)
+                            time.sleep(0.01)
+                    
+                    return answer
+                else:
+                    raise
+        
+        except Exception as e:
+            error_message = f"エラーが発生しました: {str(e)}"
+            print(f"回答生成中にエラーが発生しました: {e}")
+            
+            # エラーメッセージもストリーミングで送信
+            if callback:
+                for char in error_message:
+                    callback(char)
+                    time.sleep(0.01)
+                
+            return error_message
+
     def generate_answer(self, query, context):
-        """質問と関連コンテキストを用いて回答を生成する"""
+        """質問と関連コンテキストを用いて回答を生成する（非ストリーミング）"""
         print(f"クエリ: {query}")
         try:
             relevant_context = self.retrieve_relevant_context(query, context)

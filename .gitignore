@@ -4,3 +4,4 @@ gpt2/
 __pycache__
 data/documents/*
 models/
+DeepSeek-R1/
