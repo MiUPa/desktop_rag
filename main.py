@@ -2,8 +2,10 @@ import os
 os.environ["TRANSFORMERS_NO_SAFE_TENSORS"] = "1"
 
 # その後で他のモジュールをインポートする
-from src.app import RAGApp
 import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))  # カレントディレクトリをパスに追加
+
+from src.app import RAGApp
 import time
 import signal
 from watchdog.observers import Observer
@@ -26,7 +28,13 @@ class ChangeHandler(FileSystemEventHandler):
 
 if __name__ == "__main__":
     path = '.'  # 現在のディレクトリを監視
-    process = subprocess.Popen(['python', 'src/app.py'])  # アプリケーションの起動
+    # 環境変数を設定してPYTHONPATHにカレントディレクトリを追加
+    env = os.environ.copy()
+    env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__))
+    
+    # 環境変数を設定してプロセスを起動
+    process = subprocess.Popen(['python', 'src/app.py'], env=env)
+    
     event_handler = ChangeHandler(process)
     
     observer = Observer()
