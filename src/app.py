@@ -19,6 +19,9 @@ class RAGApp:
         self.streaming_active = False
         self.streaming_thread = None
         
+        # 会話履歴を保存するリスト
+        self.conversation_history = []
+        
         # モデルパスの設定
         retrieval_model_path = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
         
@@ -65,6 +68,10 @@ class RAGApp:
         self.reload_docs_button = tk.Button(top_frame, text="documentsから読込", command=self.load_pdfs_from_documents)
         self.reload_docs_button.pack(side=tk.LEFT, padx=5)
         
+        # 会話履歴クリアボタン
+        self.clear_history_button = tk.Button(top_frame, text="会話履歴クリア", command=self.clear_conversation_history)
+        self.clear_history_button.pack(side=tk.LEFT, padx=5)
+        
         # PDFリスト表示ラベル
         pdf_label = tk.Label(self.root, text="追加されたPDF:")
         pdf_label.pack(anchor=tk.W, padx=10)
@@ -108,19 +115,20 @@ class RAGApp:
                                       bg="#4CAF50", fg="white", command=self.search)
         self.query_button.pack(side=tk.RIGHT, padx=5)
         
-        # 結果表示ラベル
-        result_label = tk.Label(self.root, text="回答:", font=('Helvetica', 12, 'bold'))
-        result_label.pack(anchor=tk.W, padx=10)
+        # 会話表示領域のラベル
+        conversation_label = tk.Label(self.root, text="会話履歴:", font=('Helvetica', 12, 'bold'))
+        conversation_label.pack(anchor=tk.W, padx=10)
         
-        # 結果表示領域（スクロール可能なテキストエリア）- 視認性向上
+        # 会話履歴表示領域（スクロール可能なテキストエリア）- チャットUIスタイル
         result_font = font.Font(family="Helvetica", size=11)
         self.result_text = scrolledtext.ScrolledText(self.root, width=80, height=20, 
                                                     font=result_font, wrap=tk.WORD)
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # スタイル設定
-        self.result_text.tag_configure("question", font=('Helvetica', 11, 'bold'))
-        self.result_text.tag_configure("answer", font=('Helvetica', 11))
+        self.result_text.tag_configure("user", font=('Helvetica', 11, 'bold'), foreground="#0066CC")
+        self.result_text.tag_configure("assistant", font=('Helvetica', 11), foreground="#006633")
+        self.result_text.tag_configure("system", font=('Helvetica', 10, 'italic'), foreground="#666666")
         self.result_text.tag_configure("loading", foreground="blue", font=('Helvetica', 11, 'italic'))
         self.result_text.tag_configure("error", foreground="red", font=('Helvetica', 11, 'bold'))
 
@@ -191,14 +199,22 @@ class RAGApp:
                 filename = os.path.basename(pdf_file)
                 self.pdf_list_text.insert(tk.END, f"{i}. {filename}\n")
 
+    def clear_conversation_history(self):
+        """会話履歴をクリアする"""
+        self.conversation_history = []
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, "会話履歴をクリアしました。\n", "system")
+        messagebox.showinfo("情報", "会話履歴をクリアしました")
+
     def stream_answer(self, query, context):
         """回答をストリーミングで表示する処理"""
         try:
-            # 処理開始を表示
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, f"質問: ", "question")
-            self.result_text.insert(tk.END, f"{query}\n\n", "question")
-            self.result_text.insert(tk.END, f"回答: \n", "answer")
+            # 既存の会話に新しい質問を追加
+            self.result_text.insert(tk.END, f"\nユーザー: ", "user")
+            self.result_text.insert(tk.END, f"{query}\n\n", "user")
+            
+            # システム応答開始
+            self.result_text.insert(tk.END, f"アシスタント: ", "assistant")
             
             # カーソル位置を保存
             answer_start_position = self.result_text.index(tk.END)
@@ -208,33 +224,57 @@ class RAGApp:
             self.streaming_active = True
             
             # コールバック関数を定義
+            answer_buffer = ""
+            
             def on_token(token):
+                nonlocal answer_buffer
                 if self.streaming_active:
+                    answer_buffer += token
                     # UIスレッドで実行する必要がある
                     def update_ui():
-                        self.result_text.insert(tk.END, token, "answer")
+                        self.result_text.insert(tk.END, token, "assistant")
                         self.result_text.see(tk.END)  # スクロールして最新部分を表示
                     
                     # UIスレッドでの実行をスケジュール
                     self.root.after(1, update_ui)
             
+            # 会話履歴を含んだプロンプトを作成
+            conversation_context = self.format_conversation_history()
+            
             # llm_modelにself.streaming_activeへの参照を渡す
             self.llm_model.streaming_active = self.streaming_active
             
-            # 生成処理を開始
-            answer = self.llm_model.generate_answer_streaming(query, context, callback=on_token)
+            # 生成処理を開始（会話履歴を含む）
+            answer = self.llm_model.generate_answer_streaming(
+                query, 
+                context, 
+                conversation_history=conversation_context,
+                callback=on_token
+            )
             
             # ストリーミングが終了したことを示す
             self.streaming_active = False
             
             # 最終的な回答が返されたら、表示を更新
             def finalize_answer():
-                if not answer:
+                nonlocal answer_buffer
+                
+                if not answer_buffer:
                     # 回答が空の場合
-                    self.result_text.insert(tk.END, "\n\n生成が完了しましたが、有効な回答が得られませんでした。", "error")
+                    answer_buffer = "有効な回答が得られませんでした。別の質問を試してください。"
+                    self.result_text.insert(tk.END, answer_buffer, "error")
+                
+                # 会話履歴に追加
+                self.conversation_history.append({"role": "user", "content": query})
+                self.conversation_history.append({"role": "assistant", "content": answer_buffer})
+                
+                # ヒストリーが長すぎる場合は古いものから削除
+                if len(self.conversation_history) > 10:  # 5往復分の会話を保持
+                    self.conversation_history = self.conversation_history[-10:]
                 
                 # キャレット（カーソル）を文末に移動してスクロール
                 self.result_text.see(tk.END)
+                self.result_text.insert(tk.END, "\n\n", "assistant")  # 次の会話のための空行
             
             # UIスレッドでの最終更新
             self.root.after(100, finalize_answer)
@@ -252,6 +292,25 @@ class RAGApp:
             
             # ストリーミングフラグをリセット
             self.streaming_active = False
+
+    def format_conversation_history(self):
+        """会話履歴をプロンプト用に整形する"""
+        if not self.conversation_history:
+            return ""
+            
+        history_text = "以下は以前の会話です：\n\n"
+        
+        for message in self.conversation_history:
+            role = message["role"]
+            content = message["content"]
+            
+            if role == "user":
+                history_text += f"ユーザー: {content}\n\n"
+            elif role == "assistant":
+                history_text += f"アシスタント: {content}\n\n"
+        
+        history_text += "以上の会話履歴を踏まえて、次の質問に回答してください。\n\n"
+        return history_text
 
     def search(self):
         """質問に対する回答を生成する"""
@@ -276,27 +335,31 @@ class RAGApp:
             if self.streaming_thread.is_alive():
                 self.streaming_thread.join(timeout=0.5)  # スレッドを待機
         
-        # 質問欄をクリア（新機能）
+        # 質問欄をクリア
         original_query = query  # 質問を保存
         self.query_entry.delete(0, tk.END)
         
-        # 処理中表示
-        self.result_text.delete(1.0, tk.END)
-        self.result_text.insert(tk.END, "PDFからコンテキストを抽出中...\n", "loading")
+        # 初めての会話または新しい会話の場合は履歴表示部分をクリア
+        if not self.conversation_history:
+            self.result_text.delete(1.0, tk.END)
+        
+        # 処理中表示（既存の会話履歴の後に追加）
+        self.result_text.insert(tk.END, "PDFからコンテキストを抽出中...\n", "system")
         self.root.update()
         
         try:
             # PDFからテキストを抽出
             context = self.extract_context_from_pdfs()
             if not context:
-                self.result_text.delete(1.0, tk.END)
-                self.result_text.insert(tk.END, "PDFからテキストを抽出できませんでした。別のPDFファイルを試してください。", "error")
+                self.result_text.insert(tk.END, "PDFからテキストを抽出できませんでした。別のPDFファイルを試してください。\n", "error")
                 return
             
-            # 回答生成前の表示を更新
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, "回答を生成中です。しばらくお待ちください...\n", "loading")
+            # 処理中表示を更新
+            self.result_text.insert(tk.END, "回答を生成中です...\n", "system")
             self.root.update()
+            
+            # システムメッセージを削除（会話履歴だけを残す）
+            self.remove_system_messages()
             
             # ストリーミングスレッドを開始
             self.streaming_thread = threading.Thread(
@@ -313,11 +376,51 @@ class RAGApp:
             
             # ユーザーにはシンプルなエラーメッセージを表示
             messagebox.showerror("エラー", f"処理中にエラーが発生しました:\n{str(e)}")
-            self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, f"エラーが発生しました。\n\n可能な解決策:\n", "error")
-            self.result_text.insert(tk.END, "1. 別の質問を試してください\n")
-            self.result_text.insert(tk.END, "2. PDFファイルを変更してください\n")
-            self.result_text.insert(tk.END, "3. アプリケーションを再起動してください\n")
+            self.result_text.insert(tk.END, "1. 別の質問を試してください\n", "error")
+            self.result_text.insert(tk.END, "2. PDFファイルを変更してください\n", "error")
+            self.result_text.insert(tk.END, "3. アプリケーションを再起動してください\n", "error")
+    
+    def remove_system_messages(self):
+        """システムメッセージを削除する"""
+        # テキスト全体を取得
+        full_text = self.result_text.get(1.0, tk.END)
+        
+        # 各行とそのタグを取得
+        lines = full_text.split('\n')
+        filtered_lines = []
+        current_position = "1.0"
+        
+        for line in lines:
+            line_position = current_position
+            line_end_position = self.result_text.index(f"{line_position}+{len(line)}c")
+            
+            # 行のタグを確認
+            tags = self.result_text.tag_names(line_position)
+            
+            # システムメッセージでなければ保持
+            if "system" not in tags and "loading" not in tags:
+                filtered_lines.append(line)
+            
+            # 次の行の位置を計算
+            current_position = self.result_text.index(f"{line_end_position}+1c")
+        
+        # テキストを更新
+        self.result_text.delete(1.0, tk.END)
+        for line in filtered_lines:
+            if line.startswith("ユーザー:"):
+                self.result_text.insert(tk.END, line + "\n", "user")
+            elif line.startswith("アシスタント:"):
+                self.result_text.insert(tk.END, line + "\n", "assistant")
+            else:
+                # タグ付けされていないテキストは役割によって判断
+                previous_line = filtered_lines[filtered_lines.index(line) - 1] if filtered_lines.index(line) > 0 else ""
+                if previous_line.startswith("ユーザー:"):
+                    self.result_text.insert(tk.END, line + "\n", "user")
+                elif previous_line.startswith("アシスタント:"):
+                    self.result_text.insert(tk.END, line + "\n", "assistant")
+                else:
+                    self.result_text.insert(tk.END, line + "\n")
 
     def extract_context_from_pdfs(self):
         """PDFファイルからテキストを抽出する"""

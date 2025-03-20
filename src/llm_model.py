@@ -154,7 +154,16 @@ class LLMModel:
             text = self.tokenizer.decode(tokens)
         return text
 
-    def generate_answer_streaming(self, query, context, callback=None):
+    def generate_answer(self, query, context):
+        """質問と関連コンテキストを用いて回答を生成する（非ストリーミング）"""
+        print(f"クエリ: {query}")
+        
+        # コールバックなしのストリーミング生成を利用
+        # これにより、処理のロジックを統一できる
+        answer = self.generate_answer_streaming(query, context, callback=None)
+        return answer
+
+    def generate_answer_streaming(self, query, context, callback=None, conversation_history=""):
         """ストリーミングモードで回答を生成する"""
         print(f"ストリーミングクエリ: {query}")
         try:
@@ -173,8 +182,13 @@ class LLMModel:
                 
                 return mock_answer
             
-            # 改良されたプロンプト形式
-            prompt = f"""以下のコンテキストに基づいて、与えられた質問に対する回答を日本語で生成してください。
+            # 会話履歴を含む改良されたプロンプト形式
+            # 会話履歴があれば追加
+            history_prefix = ""
+            if conversation_history:
+                history_prefix = f"{conversation_history}\n"
+            
+            prompt = f"""{history_prefix}以下のコンテキストに基づいて、与えられた質問に対する回答を日本語で生成してください。
 コンテキストに含まれる情報のみを使用し、含まれていない情報については「その情報はコンテキストに含まれていません」と述べてください。
 
 コンテキスト:
@@ -189,6 +203,7 @@ class LLMModel:
 - コンテキストに情報がない場合は「その情報はコンテキストに含まれていません」と述べてください
 - 出典情報（ファイル名、ページ番号）も回答に含めてください
 - 統計検定の問題や内容に関する質問には、可能な限り具体的に回答してください
+- 会話の流れを考慮して、自然な応答を心がけてください
 
 回答:
 """
@@ -254,7 +269,13 @@ class LLMModel:
                     print("CUDAメモリ不足エラー：より短いコンテキストで再試行します")
                     # コンテキストを短くして再試行
                     shorter_context = relevant_context[:len(relevant_context)//2]
-                    prompt = f"""以下のコンテキスト（一部）に基づいて、与えられた質問に対する回答を日本語で生成してください。
+                    
+                    # 会話履歴があれば追加
+                    history_prefix = ""
+                    if conversation_history:
+                        history_prefix = f"{conversation_history}\n"
+                    
+                    prompt = f"""{history_prefix}以下のコンテキスト（一部）に基づいて、与えられた質問に対する回答を日本語で生成してください。
 
 コンテキスト（一部）:
 {shorter_context}
@@ -349,15 +370,6 @@ class LLMModel:
             
         else:
             return f"ご質問「{query}」に対する適切な回答をコンテキストから見つけることができませんでした。PDFの内容を確認したところ、統計検定に関する情報は含まれていますが、ご質問に直接関連する情報は見つかりませんでした。より具体的な質問や、別の内容について質問してみてください。"
-
-    def generate_answer(self, query, context):
-        """質問と関連コンテキストを用いて回答を生成する（非ストリーミング）"""
-        print(f"クエリ: {query}")
-        
-        # コールバックなしのストリーミング生成を利用
-        # これにより、処理のロジックを統一できる
-        answer = self.generate_answer_streaming(query, context, callback=None)
-        return answer
 
 # テスト用RAGApp
 class RAGApp:
