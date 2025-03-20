@@ -25,12 +25,8 @@ class RAGApp:
         # モデルパスの設定
         retrieval_model_path = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
         
-        # ローカルモデルパスの確認
-        models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
-        generation_model_path = os.path.join(models_dir, "japanese-gpt2-medium")
-        
-        if not os.path.exists(generation_model_path):
-            generation_model_path = "rinna/japanese-gpt2-medium"  # フォールバック
+        # 小さなモデルを常に使用するように設定（大きなモデルをスキップ）
+        generation_model_path = "rinna/japanese-gpt2-medium"  # 小さなモデルを直接指定
         
         print(f"情報検索モデル: {retrieval_model_path}")
         print(f"文章生成モデル: {generation_model_path}")
@@ -90,7 +86,8 @@ class RAGApp:
         
         # 質問入力欄（例を含む）- 視認性向上
         custom_font = font.Font(family="Helvetica", size=12)
-        self.query_entry = tk.Entry(query_frame, width=50, font=custom_font, bg="#F0F8FF")
+        self.query_entry = tk.Entry(query_frame, width=50, font=custom_font, bg="white", 
+                                   fg="black", relief=tk.SUNKEN, bd=2)
         self.query_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         self.query_entry.insert(0, "例: 統計検定1級の試験範囲は何ですか？")
         self.query_entry.config(fg="gray")
@@ -110,9 +107,11 @@ class RAGApp:
         self.query_entry.bind("<FocusOut>", on_entry_focus_out)
         self.query_entry.bind("<Return>", lambda event: self.search())
         
-        # 検索ボタン
-        self.query_button = tk.Button(query_frame, text="質問する", font=('Helvetica', 11), 
-                                      bg="#4CAF50", fg="white", command=self.search)
+        # 検索ボタン - より目立つデザイン
+        self.query_button = tk.Button(query_frame, text="質問する", font=('Helvetica', 12, 'bold'), 
+                                     bg="#4CAF50", fg="white", 
+                                     activebackground="#45a049", activeforeground="white",
+                                     padx=15, pady=5, command=self.search)
         self.query_button.pack(side=tk.RIGHT, padx=5)
         
         # 会話表示領域のラベル
